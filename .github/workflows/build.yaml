@@ -2,32 +2,53 @@ name: Main
 
 on: push
 
+env:
+  APP_NAME_VERACODE: "test-veracode-CI" #veracode application name given in onboarding ticket.
+  PACKAGE_FILE_NAME: "scan-files.zip"
+
 jobs:
-  build:
+  Securtity-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 16
-      - uses: pnpm/action-setup@v2
-        with:
-          version: 7
+      - name: Check out repository code
+        uses: actions/checkout@v4
 
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run dist
+      - name: create packages
+        run: zip scan-files.zip `find . -name "*.*s" -print`>> security.log
+        
+      - name: integrate security shared library
+        run: |
+            curl --create-dirs -o secu-setup.sh https://${{ secrets.ACTION_GITHUB_TOKEN }}@raw.githubusercontent.com/shift-technology/security-shared-library/main/setup.sh >> security.log
+            chmod +x secu-setup.sh
+            ./secu-setup.sh ${{ secrets.VERACODE_API_ID }} ${{ secrets.VERACODE_API_SECRET_KEY }} ${{ secrets.ACTION_GITHUB_TOKEN }}
 
-      - name: Artifacts
-        uses: actions/upload-artifact@v3
+      - name: Veracode Create Application sandbox
+        if: ${{ github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, 'release')) }}
+        uses: ./.github/actions/sandbox
         with:
-          name: Extension
-          path: web-ext-artifacts/*.zip
-      - name: Sign
-        uses: tristan-weil/ghaction-checksum-sign-artifact@v1
+          application: $APP_NAME_VERACODE
+          sandbox: ${{ github.ref_name }}
+          type: create
+
+      - name: pipeline-scan action step
+        if: ${{ github.ref_name != 'main' }}
+        uses: ./.github/actions/pipelinescan
         with:
-          path: web-ext-artifacts/*.zip
-      - name: Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+          v_api_id: ${{ secrets.VERACODE_API_ID}}
+          v_api_key: ${{ secrets.VERACODE_API_SECRET_KEY }}
+          package_to_scan: $PACKAGE_FILE_NAME
+
+      - name: Veracode SAST upload scan to UI
+        if: ${{ github.event_name == 'push' && (github.ref_name == 'main' || startsWith(github.ref_name, 'release')) }}
+        uses: ./.github/actions/uploadscan
         with:
-          files: web-ext-artifacts/*.zip
+          v_api_id: ${{ secrets.VERACODE_API_ID}}
+          v_api_key: ${{ secrets.VERACODE_API_SECRET_KEY }}
+          application: $APP_NAME_VERACODE
+          package_to_scan: $PACKAGE_FILE_NAME
+
+      - name: Veracode SCA scan
+        uses: ./.github/actions/compositionscan
+        with:
+          github_api_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          srcclr_token: ${{ secrets.SRCCLR_API_TOKEN }}
