@@ -1,6 +1,7 @@
 name: Main
 
 on: push
+
 env:
   APP_NAME_VERACODE: "test-veracode-CI" #veracode application name given in onboarding ticket.
   PACKAGE_FILE_NAME: "scan-files.zip"
